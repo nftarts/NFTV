@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:url_strategy/url_strategy.dart';
@@ -15,11 +18,14 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock/wakelock.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
+import 'package:path/path.dart' as path;
+import 'package:native_video_view/native_video_view.dart';
 
 Future<List<Nft>> fetchNfts(String rawaddress, Settings sett) async {
   List<String> adresses = rawaddress.split("+");
   List<Nft> nfts = [];
-  int maxLength = 12;
+  int maxLength = 24;
   try {
     for (String address in adresses) {
       address = address.replaceAll(' ', '');
@@ -35,8 +41,7 @@ Future<List<Nft>> fetchNfts(String rawaddress, Settings sett) async {
           // If the server did return a 200 OK response,
           // then parse the JSON.
 
-          Map<String, dynamic> jsonMap =
-              jsonDecode(utf8.decode(response.bodyBytes));
+          Map<String, dynamic> jsonMap = jsonDecode(utf8.decode(response.bodyBytes));
           List<dynamic> assets = jsonMap["assets"];
           assets.forEach((asset) {
             if (nfts.length < maxLength) {
@@ -57,11 +62,7 @@ Future<List<Nft>> fetchNfts(String rawaddress, Settings sett) async {
         if (kIsWeb) {
           _authority = "us-central1-nftv-306020.cloudfunctions.net";
           _path = "cors";
-          _params = {
-            "url":
-                "https://api.niftygateway.com/user/profile-and-offchain-nifties-by-url/?profile_url=" +
-                    address
-          };
+          _params = {"url": "https://api.niftygateway.com/user/profile-and-offchain-nifties-by-url/?profile_url=" + address};
         } else {
           _authority = "api.niftygateway.com";
           _path = "/user/profile-and-offchain-nifties-by-url";
@@ -72,8 +73,7 @@ Future<List<Nft>> fetchNfts(String rawaddress, Settings sett) async {
         if (response.statusCode == 200) {
           // If the server did return a 200 OK response,
           // then parse the JSON.
-          Map<String, dynamic> jsonMap =
-              jsonDecode(utf8.decode(response.bodyBytes));
+          Map<String, dynamic> jsonMap = jsonDecode(utf8.decode(response.bodyBytes));
           String owner = address;
           List<dynamic> assets = jsonMap["userProfileAndNifties"]["nifties"];
           assets.forEach((asset) {
@@ -91,31 +91,23 @@ Future<List<Nft>> fetchNfts(String rawaddress, Settings sett) async {
     }
     if (nfts.length > 40) {}
     sett.setNfts(nfts);
-    print("saved nfts nft");
     sett.setOnline();
   } on Exception catch (exception) {
-    print(exception.toString());
     if (exception.toString() == 'Exception: Nifty user not found') {
       throw Exception('Nifty user not found');
     } else if (exception.toString() == 'Exception: Wallet not found') {
-      print("Wallet not found");
       throw Exception('Wallet not found');
     } else {
-      print("offline exception: " + exception.toString());
       nfts = await sett.getNfts();
       if (nfts == null) {
         throw Exception('offline');
       }
-      print("Offline mode");
       sett.setOffline();
     }
   } catch (error) {
-    print("might be offline: " + error.toString());
     nfts = await sett.getNfts();
-    print("Offline mode");
     sett.setOffline();
   }
-  print("fetched nfts");
   return nfts;
 }
 
@@ -139,12 +131,12 @@ class Settings {
   bool showQrcode = true;
   bool showArtist = true;
   bool online = true;
-  int imgDuration = 10000;
+  int imgDuration = 20000;
 
   Settings({
     this.wallet = '0x5fcf4f5cd39bb519b142d3d4541f67bbe056bc81',
     this.showArtist = true,
-    this.imgDuration = 10000,
+    this.imgDuration = 20000,
     this.showTitle = true,
     this.showOwner = true,
     this.showTraits = true,
@@ -161,7 +153,7 @@ class Settings {
           this.showOwner = prefs.getBool("showOwner") ?? true,
           this.showPrice = prefs.getBool("showPrice") ?? true,
           this.showQrcode = prefs.getBool("showQrcode") ?? true,
-          this.imgDuration = prefs.getInt("imgDuration") ?? 10000,
+          this.imgDuration = prefs.getInt("imgDuration") ?? 20000,
         });
   }
 
@@ -175,8 +167,7 @@ class Settings {
 
   Future<String> getWallet() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    return prefs.getString("wallet") ??
-        '0x5fcf4f5cd39bb519b142d3d4541f67bbe056bc81';
+    return prefs.getString("wallet") ?? '0x5fcf4f5cd39bb519b142d3d4541f67bbe056bc81';
   }
 
   Future<bool> setWallet(String value) async {
@@ -188,21 +179,15 @@ class Settings {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     List<String> nftsJson = prefs.getStringList("nfts");
     if (nftsJson != null) {
-      return prefs
-          .getStringList("nfts")
-          .map((e) => Nft.fromCache(jsonDecode(e)))
-          .toList();
+      return prefs.getStringList("nfts").map((e) => Nft.fromCache(jsonDecode(e))).toList();
     } else {
       return (null);
     }
   }
 
   Future<bool> setNfts(List<Nft> nfts) async {
-    print("starting save nft");
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    List<String> nftsEncoded =
-        nfts.map((nft) => jsonEncode(nft.toJson())).toList();
-    print(nftsEncoded.toString());
+    List<String> nftsEncoded = nfts.map((nft) => jsonEncode(nft.toJson())).toList();
     return prefs.setStringList("nfts", nftsEncoded);
   }
 
@@ -273,7 +258,7 @@ class Settings {
 
   Future<bool> setImgDuration(int value) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    return prefs.setInt("imgDuration", value);
+    return prefs.setInt("imgDuration", value) ?? 20000;
   }
 }
 
@@ -292,19 +277,7 @@ class Nft {
 
   bool enabled;
 
-  Nft(
-      {this.id,
-      this.name,
-      this.artist,
-      this.owner,
-      this.traits,
-      this.qr,
-      this.lastSale,
-      this.animUrl,
-      this.imgUrl,
-      this.thumbUrl,
-      this.type,
-      this.enabled});
+  Nft({this.id, this.name, this.artist, this.owner, this.traits, this.qr, this.lastSale, this.animUrl, this.imgUrl, this.thumbUrl, this.type, this.enabled});
 
   factory Nft.fromJson(Map<String, dynamic> json) {
     String tempOwner = '';
@@ -337,16 +310,16 @@ class Nft {
       if (json['creator']['user'] != null) {
         tempCreator = json['creator']['user']['username'];
       } else {
-        tempCreator = 'no artist name';
+        tempCreator = 'Unknown';
       }
     } else {
-      tempCreator = 'no artist name';
+      tempCreator = 'Unknown';
     }
 
     if (json['last_sale'] != null) {
       tempLastSale = json['last_sale']['payment_token']['usd_price'].toString();
     } else {
-      tempLastSale = 'no last sale';
+      tempLastSale = 'Unknown';
     }
 
     return Nft(
@@ -385,16 +358,14 @@ class Nft {
   factory Nft.fromNiftyJson(Map<String, dynamic> json, String owner) {
     String type = 'animated';
     String sdImgUrl = '';
-    if (json['image_url'].toString().toLowerCase().contains(".mp4") ||
-        json['image_url'].toString().toLowerCase().contains(".mov")) {
+    if (json['image_url'].toString().toLowerCase().contains(".mp4") || json['image_url'].toString().toLowerCase().contains(".mov")) {
       type = 'animated';
-      sdImgUrl = json['image_url']
-          .replaceAll('/upload/', '/upload/q_auto:good,w_500/');
-      print(sdImgUrl);
+      sdImgUrl = json['image_url'].replaceAll('/upload/', '/upload/q_auto:good,w_500/');
     } else {
       type = 'image';
       sdImgUrl = json['image_preview_url'];
     }
+    String animUrl = json['image_url'].toString().replaceFirst('upload/', 'upload/q_auto:good,h_2160/');
 
     return Nft(
       id: json['id'] ?? '',
@@ -403,8 +374,8 @@ class Nft {
       artist: json['creator_info']['name'] ?? '',
       traits: json['description'] ?? '',
       qr: json['contractAddress'] ?? '',
-      lastSale: "NA",
-      animUrl: json['image_url'] ?? '',
+      lastSale: "Unknown",
+      animUrl: animUrl ?? '',
       imgUrl: json['image_url'] ?? '',
       thumbUrl: sdImgUrl ?? '',
       type: type ?? '',
@@ -436,44 +407,44 @@ void main() {
   runApp(MyApp(wallet_url: wallet_url));
 }
 
+Future<File> getThumbnail(String url) async {
+  String filepath = (await getTemporaryDirectory()).path + "/" + path.basenameWithoutExtension(url) + '.jpg';
+  if (await File(filepath).exists()) {
+    return File(filepath);
+  } else {
+    return File(await VideoThumbnail.thumbnailFile(video: url, maxWidth: 300, imageFormat: ImageFormat.JPEG, quality: 85, thumbnailPath: (await getTemporaryDirectory()).path));
+  }
+}
+
 class MyGrid extends StatefulWidget {
   final Future<List<Nft>> nfts;
   final Settings sett;
+  final ValueChanged<int> update;
 
-  MyGrid({Key key, @required this.nfts, @required this.sett}) : super(key: key);
+  MyGrid({Key key, this.update, @required this.nfts, @required this.sett}) : super(key: key);
 
   @override
   _MyGridState createState() => _MyGridState();
 }
 
 class _MyGridState extends State<MyGrid> {
-  VideoPlayerController vidcontroller;
+  bool isProcessing = false;
+
   @override
-  void dispose() {
-      if(vidcontroller != null) {
-        vidcontroller.dispose();
-      }
-    super.dispose();
+  void initState() {
+    super.initState();
   }
-  @override
-  void deactivate() {
-    if(vidcontroller != null) {
-      vidcontroller.dispose();
-    }
-    super.deactivate();
-  }
+
   @override
   Widget build(BuildContext context) {
     double width = MediaQuery.of(context).size.width;
     int widthCard = 300;
     int countRow = width ~/ widthCard;
 
-    Future<void> _initializeVideoPlayerFuture;
     String truncate(int cutoff, String myString) {
-      return (myString.length <= cutoff)
-          ? myString
-          : '${myString.substring(0, cutoff)}...';
+      return (myString.length <= cutoff) ? myString : '${myString.substring(0, cutoff)}...';
     }
+
     return (FutureBuilder<List<Nft>>(
       future: widget.nfts,
       builder: (context, snapshot) {
@@ -487,14 +458,20 @@ class _MyGridState extends State<MyGrid> {
             itemBuilder: (BuildContext context, int index) {
               //Future<File> image = DefaultCacheManager().getSingleFile(snapshot.data[index].imgUrl);
               //Future<File> video = DefaultCacheManager().getSingleFile(snapshot.data[index].animUrl);
-              Future<File> thumbnail = DefaultCacheManager()
-                  .getSingleFile(snapshot.data[index].thumbUrl);
-              Future<File> qr = DefaultCacheManager().getSingleFile(
-                  "https://api.qrserver.com/v1/create-qr-code/?bgcolor=999999&size=100x100&data=" +
-                      snapshot.data[index].qr);
+              //get thumbnail
+              Future<File> thumbnail;
+              if (snapshot.data[index].type == "animated") {
+                if (kIsWeb) {
+                  thumbnail = DefaultCacheManager().getSingleFile(snapshot.data[index].animUrl);
+                } else {
+                  thumbnail = getThumbnail(snapshot.data[index].animUrl);
+                }
+              } else {
+                thumbnail = DefaultCacheManager().getSingleFile(snapshot.data[index].thumbUrl);
+              }
+              Future<File> qr = DefaultCacheManager().getSingleFile("https://api.qrserver.com/v1/create-qr-code/?bgcolor=ffffff&size=100x100&data=" + snapshot.data[index].qr);
               return Padding(
-                padding: const EdgeInsets.only(
-                    top: 15, bottom: 15, left: 15, right: 15),
+                padding: const EdgeInsets.only(top: 15, bottom: 15, left: 15, right: 15),
                 child: Container(
                   width: 1,
                   child: Row(
@@ -507,50 +484,69 @@ class _MyGridState extends State<MyGrid> {
                             Row(children: <Widget>[
                               Switch(
                                 value: snapshot.data[index].enabled,
+                                activeTrackColor: Color(0xFFC4C4C4),
+                                inactiveTrackColor: Color(0xFF777777),
+                                activeColor: Color(0xFF000000),
+                                inactiveThumbColor: Color(0xFFE0E0E0),
                                 onChanged: (value) {
+                                  widget.update(1);
                                   setState(() {
                                     snapshot.data[index].enabled = value;
+                                    widget.sett.setNfts(snapshot.data);
                                   });
                                 },
                               ),
                               Expanded(
                                 child: Stack(children: [
-                                  Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        if (widget.sett.showTitle == true)
-                                          Text(
-                                            snapshot.data[index].name,
-                                            style: TextStyle(
-                                                fontSize: 18, height: 1.5),
-                                          ),
-                                        if (widget.sett.showArtist == true)
-                                          Text(
-                                            "artist: " +
-                                                snapshot.data[index].artist,
-                                            style: TextStyle(fontSize: 12),
-                                          ),
-                                        if (widget.sett.showOwner == true)
-                                          Text(
-                                            "owner: " +
-                                                snapshot.data[index].owner,
-                                            style: TextStyle(fontSize: 12),
-                                          ),
-                                        if (widget.sett.showPrice == true)
-                                          Text(
-                                            "last sale: " +
-                                                snapshot.data[index].lastSale
-                                                    .toString(),
-                                            style: TextStyle(fontSize: 12),
-                                          ),
-                                        if (widget.sett.showTraits == true)
-                                          Text(
-                                            "traits: " +
-                                                truncate(25,snapshot.data[index].traits),
-                                            style: TextStyle(fontSize: 12),
-                                          ),
-                                      ]),
+                                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                    if (widget.sett.showTitle == true)
+                                      RichText(
+                                        text: TextSpan(
+                                          text: snapshot.data[index].name,
+                                          style: TextStyle(color: Colors.black.withOpacity(0.8), fontSize: 16, height: 1.5, fontFamily: "BigJohnProThin"),
+                                        ),
+                                      ),
+                                    if (widget.sett.showArtist == true)
+                                      RichText(
+                                        text: TextSpan(
+                                          text: 'Artist: '.toUpperCase(),
+                                          style: TextStyle(color: Colors.black.withOpacity(0.8), fontSize: 8, fontFamily: "BigJohnPro"),
+                                          children: <TextSpan>[
+                                            TextSpan(text: snapshot.data[index].artist, style: TextStyle(fontSize: 10)),
+                                          ],
+                                        ),
+                                      ),
+                                    if (widget.sett.showOwner == true)
+                                      RichText(
+                                        text: TextSpan(
+                                          text: 'Owner: '.toUpperCase(),
+                                          style: TextStyle(color: Colors.black.withOpacity(0.8), fontSize: 8, fontFamily: "BigJohnPro"),
+                                          children: <TextSpan>[
+                                            TextSpan(text: snapshot.data[index].owner, style: TextStyle(fontSize: 10)),
+                                          ],
+                                        ),
+                                      ),
+                                    if (widget.sett.showPrice == true)
+                                      RichText(
+                                        text: TextSpan(
+                                          text: 'Last Sale: '.toUpperCase(),
+                                          style: TextStyle(color: Colors.black.withOpacity(0.8), fontSize: 8, fontFamily: "BigJohnPro"),
+                                          children: <TextSpan>[
+                                            TextSpan(text: snapshot.data[index].lastSale, style: TextStyle(fontSize: 10)),
+                                          ],
+                                        ),
+                                      ),
+                                    if (widget.sett.showTraits == true)
+                                      RichText(
+                                        text: TextSpan(
+                                          text: 'Traits: '.toUpperCase(),
+                                          style: TextStyle(color: Colors.black.withOpacity(0.8), fontSize: 8, fontFamily: "BigJohnPro"),
+                                          children: <TextSpan>[
+                                            TextSpan(text: truncate(30, snapshot.data[index].traits), style: TextStyle(fontSize: 10)),
+                                          ],
+                                        ),
+                                      ),
+                                  ]),
                                   if (widget.sett.showQrcode == true)
                                     Positioned(
                                         top: 0,
@@ -559,20 +555,12 @@ class _MyGridState extends State<MyGrid> {
                                           future: qr,
                                           builder: (context, snapshotImg) {
                                             if (snapshotImg.hasData) {
-                                              return (Container(
-                                                  width: 50.0,
-                                                  height: 50.0,
-                                                  child: Center(
-                                                      child: Image.file(
-                                                          snapshotImg.data,
-                                                          width: 50,
-                                                          height: 50))));
+                                              return (Container(width: 50.0, height: 50.0, child: Center(child: Image.file(snapshotImg.data, width: 50, height: 50))));
                                             }
                                             return Center(
                                                 child: Opacity(
                                               opacity: 0.2,
-                                              child:
-                                                  CircularProgressIndicator(),
+                                              child: CircularProgressIndicator(),
                                             ));
                                           },
                                         )),
@@ -586,82 +574,42 @@ class _MyGridState extends State<MyGrid> {
                                     context,
                                     MaterialPageRoute(
                                         builder: (context) => MyDisplay(
-                                              nfts: [snapshot.data[index]],
+                                              nfts: snapshot.data,
+                                              start: index,
                                               sett: widget.sett,
                                             )),
                                   );
                                 },
                                 child: Padding(
-                                  padding: const EdgeInsets.only(
-                                      top: 10, bottom: 10, left: 0, right: 0),
+                                  padding: const EdgeInsets.only(top: 10, bottom: 10, left: 0, right: 0),
                                   child: Center(
                                     child: FutureBuilder(
                                         future: thumbnail,
                                         builder: (context, snapshotImg) {
                                           if (snapshotImg.hasData) {
-                                            if (snapshot.data[index].type ==
-                                                'animated') {
-                                              if (snapshot.data[index].thumbUrl.toLowerCase().contains(".mov") || snapshot.data[index].thumbUrl.toLowerCase().contains(".mp4")) {
-                                                if (vidcontroller != null) {
-                                                  //vidcontroller.dispose();
-                                                }
-                                                if (kIsWeb) {
-                                                  print(snapshot
-                                                      .data[index].thumbUrl);
-                                                  vidcontroller =
-                                                      VideoPlayerController
-                                                          .network(snapshot
-                                                              .data[index]
-                                                              .thumbUrl);
-                                                } else {
-                                                  vidcontroller =
-                                                      VideoPlayerController
-                                                          .file(
-                                                              snapshotImg.data);
-                                                }
-                                                vidcontroller.setLooping(true);
-                                                vidcontroller.setVolume(0.0);
-                                                _initializeVideoPlayerFuture =
-                                                    vidcontroller.initialize();
-                                                return (FutureBuilder(
-                                                  future:
-                                                      _initializeVideoPlayerFuture,
-                                                  builder: (context, snapshot) {
-                                                    if (snapshot
-                                                            .connectionState ==
-                                                        ConnectionState.done) {
-                                                      vidcontroller.play();
-                                                      // If the VideoPlayerController has finished initialization, use
-                                                      // the data it provides to limit the aspect ratio of the VideoPlayer.
-                                                      return AspectRatio(
-                                                        aspectRatio:
-                                                            vidcontroller.value
-                                                                .aspectRatio,
-                                                        // Use the VideoPlayer widget to display the video.
-                                                        child: VideoPlayer(
-                                                            vidcontroller),
-                                                      );
-                                                    } else {
-                                                      // If the VideoPlayerController is still initializing, show a
-                                                      // loading spinner.
-                                                      return Center(
-                                                          child: Opacity(
-                                                        opacity: 0.2,
-                                                        child:
-                                                            CircularProgressIndicator(),
-                                                      ));
+                                            if (kIsWeb && snapshot.data[index].type == "animated") {
+                                              VideoPlayerController _controller = VideoPlayerController.network(snapshot.data[index].animUrl);
+                                              Future<void> _initializeVideoPlayerFuture = _controller.initialize();
+                                              return FutureBuilder(
+                                                  future: _initializeVideoPlayerFuture,
+                                                  builder: (context, snapshotvid) {
+                                                    if (snapshotvid.connectionState == ConnectionState.done) {
+                                                      return (AbsorbPointer(child:VideoPlayer(_controller)));
                                                     }
-                                                  },
-                                                ));
-                                              }
+                                                    return Center(
+                                                        child: Opacity(
+                                                      opacity: 0.2,
+                                                      child: CircularProgressIndicator(),
+                                                    ));
+                                                  });
+                                            } else {
+                                              return (Image.file(snapshotImg.data));
                                             }
-                                            return (Image.file(snapshotImg.data));
                                           } else {
                                             return Center(
                                                 child: Opacity(
                                               opacity: 0.2,
-                                              child:
-                                                  CircularProgressIndicator(),
+                                              child: CircularProgressIndicator(),
                                             ));
                                           }
                                         }),
@@ -679,10 +627,8 @@ class _MyGridState extends State<MyGrid> {
             },
             itemCount: snapshot.data == null ? 0 : snapshot.data.length,
           );
-        }
-        else if (snapshot.hasError) {
-          print(snapshot.error.toString());
-          return(CircularProgressIndicator());
+        } else if (snapshot.hasError) {
+          return (CircularProgressIndicator());
         }
         // By default, show a loading spinner.
         return Center(
@@ -718,15 +664,9 @@ class _MyAppState extends State<MyApp> {
               labelStyle: TextStyle(color: Colors.black),
               hintStyle: TextStyle(color: Colors.grey),
             ),
-            fontFamily: 'Roboto',
+            fontFamily: 'BigJohnProBold',
             primarySwatch: MyColors.salmon,
-            iconTheme: IconThemeData(color: Colors.white),
-            primaryTextTheme: TextTheme(
-              headline6: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w300,
-              ),
-            ),
+            iconTheme: IconThemeData(color: Colors.black),
           ),
           home: MyHome(
             wallet_url: widget.wallet_url,
@@ -781,15 +721,7 @@ class _MyHomeState extends State<MyHome> {
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  void _openEndDrawer() {
-    _scaffoldKey.currentState.openEndDrawer();
-  }
-
-  void _closeEndDrawer() {
-    Navigator.of(context).pop();
-  }
-
-  void _onAfterBuild(BuildContext context) {
+  void update(int) {
     setState(() {});
   }
 
@@ -797,10 +729,8 @@ class _MyHomeState extends State<MyHome> {
     if (kIsWeb) {
       return false;
     } else if (Platform.isAndroid) {
-      AndroidDeviceInfo androidDeviceInfo =
-          await DeviceInfoPlugin().androidInfo;
-      return androidDeviceInfo.systemFeatures
-          .contains('android.software.leanback');
+      AndroidDeviceInfo androidDeviceInfo = await DeviceInfoPlugin().androidInfo;
+      return androidDeviceInfo.systemFeatures.contains('android.software.leanback');
     } else {
       return false;
     }
@@ -812,8 +742,7 @@ class _MyHomeState extends State<MyHome> {
     const _chars = 'abcdefghijklmnopqrstuvwxyz1234567890';
     Random _rnd = Random();
     int length = 4;
-    code = String.fromCharCodes(Iterable.generate(
-        length, (_) => _chars.codeUnitAt(_rnd.nextInt(_chars.length))));
+    code = String.fromCharCodes(Iterable.generate(length, (_) => _chars.codeUnitAt(_rnd.nextInt(_chars.length))));
     androidTv = checkTv();
     sett = new Settings();
     if (widget.wallet_url != '') {
@@ -831,8 +760,7 @@ class _MyHomeState extends State<MyHome> {
             setState(() {}),
           });
     }
-    imgHldController =
-        new TextEditingController(text: (sett.imgDuration ~/ 1000).toString());
+    imgHldController = new TextEditingController(text: (sett.imgDuration ~/ 1000).toString());
   }
 
   @override
@@ -840,15 +768,15 @@ class _MyHomeState extends State<MyHome> {
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        title: Text.rich(TextSpan(text: 'NFTV', children: <InlineSpan>[
-          TextSpan(
-            text: sett.online ? '' : '  offline, reconnect to update wallet',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w200),
-          )
-        ])),
-        iconTheme: IconThemeData(color: Colors.white),
+        title: Text(
+          "NFTV",
+          style: TextStyle(fontSize: 25, fontFamily: 'BigJohnProThin'),
+        ),
+        elevation: 0,
+        iconTheme: IconThemeData(color: Colors.black),
+        backgroundColor: Color(0xFFEFEFEF),
       ),
-      backgroundColor: Color(0xFFB0B0B0),
+      backgroundColor: Color(0xFFEFEFEF),
       floatingActionButton: FutureBuilder<bool>(
           future: androidTv,
           builder: (context, snapshot) {
@@ -859,6 +787,7 @@ class _MyHomeState extends State<MyHome> {
                     builder: (context, snapshot) {
                       if (snapshot.hasData) {
                         return FloatingActionButton(
+                          elevation: 0,
                           tooltip: "Display NFTs",
                           onPressed: () {
                             // Add your onPressed code here!
@@ -867,15 +796,15 @@ class _MyHomeState extends State<MyHome> {
                               MaterialPageRoute(
                                   builder: (context) => MyDisplay(
                                         nfts: snapshot.data,
+                                        start: 0,
                                         sett: sett,
                                       )),
                             );
                           },
                           child: Icon(Icons.play_arrow),
-                          foregroundColor: Colors.white,
+                          foregroundColor: Colors.black,
                         );
                       } else if (snapshot.hasError) {
-                        print(snapshot.error.toString());
                         //return Text("Error");
                       }
                       // By default, show a loading spinner.
@@ -896,8 +825,7 @@ class _MyHomeState extends State<MyHome> {
           }),
       body: DefaultTextStyle(
         style: TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w300,
+          color: Colors.black,
         ),
         child: FutureBuilder<bool>(
             future: androidTv, // a previously-obtained Future
@@ -908,161 +836,116 @@ class _MyHomeState extends State<MyHome> {
                     Future initialized = Firebase.initializeApp();
                     return (FutureBuilder<FirebaseApp>(
                         future: initialized,
-                        builder: (BuildContext context,
-                            AsyncSnapshot<FirebaseApp> snapshot) {
+                        builder: (BuildContext context, AsyncSnapshot<FirebaseApp> snapshot) {
                           if (snapshot.hasData == true) {
-                            DocumentReference inputData = FirebaseFirestore
-                                .instance
-                                .collection('codes')
-                                .doc(code);
+                            DocumentReference inputData = FirebaseFirestore.instance.collection('codes').doc(code);
                             return (StreamBuilder<DocumentSnapshot>(
                                 stream: inputData.snapshots(),
-                                builder: (BuildContext context,
-                                    AsyncSnapshot<DocumentSnapshot> snapshot) {
+                                builder: (BuildContext context, AsyncSnapshot<DocumentSnapshot> snapshot) {
                                   if (snapshot.hasData) {
                                     if (snapshot.data.data() != null) {
-                                      _controller.text =
-                                          snapshot.data.data()['value'];
-                                      sett.wallet =
-                                          snapshot.data.data()['value'];
-                                      sett.setWallet(
-                                          snapshot.data.data()['value']);
-                                      futureNfts = fetchNfts(
-                                          snapshot.data.data()['value'], sett);
+                                      _controller.text = snapshot.data.data()['value'];
+                                      sett.wallet = snapshot.data.data()['value'];
+                                      sett.setWallet(snapshot.data.data()['value']);
+                                      futureNfts = fetchNfts(snapshot.data.data()['value'], sett);
                                     }
                                   }
                                   return (Column(children: <Widget>[
                                     Container(
-                                        color:
-                                            Colors.grey[400].withOpacity(0.2),
+                                        color: Color(0xFFD7D7D7),
                                         child: Padding(
                                             padding: EdgeInsets.all(10.0),
                                             child: Theme(
                                                 data: new ThemeData(
-                                                  primaryColor: Colors.white,
-                                                  primaryColorDark:
-                                                      Colors.white,
+                                                  primaryColor: Colors.black,
+                                                  primaryColorDark: Colors.black,
                                                 ),
                                                 child: Row(children: [
                                                   Expanded(
                                                       child: TextField(
                                                     enabled: false,
-                                                    style: TextStyle(
-                                                        color: Colors.white),
+                                                    style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin"),
                                                     controller: _controller,
                                                     decoration: InputDecoration(
-                                                      enabledBorder:
-                                                          const OutlineInputBorder(
-                                                        borderSide:
-                                                            const BorderSide(
-                                                          color: Colors.white,
+                                                      enabledBorder: const OutlineInputBorder(
+                                                        borderRadius: BorderRadius.zero,
+                                                        borderSide: const BorderSide(
+                                                          color: Colors.black,
                                                         ),
                                                       ),
-                                                      disabledBorder:
-                                                          const OutlineInputBorder(
-                                                        borderSide:
-                                                            const BorderSide(
-                                                          color: Colors.white,
+                                                      disabledBorder: const OutlineInputBorder(
+                                                        borderRadius: BorderRadius.zero,
+                                                        borderSide: const BorderSide(
+                                                          color: Colors.black,
                                                         ),
                                                       ),
-                                                      border:
-                                                          OutlineInputBorder(),
-                                                      labelText:
-                                                          'go to nftv.app/$code to connect your NFT wallet',
-                                                      hintText:
-                                                          "use + to add multiple",
-                                                      labelStyle: TextStyle(
-                                                          color: Colors.white),
-                                                      hintStyle: TextStyle(
-                                                          color: Colors.white),
+                                                      border: OutlineInputBorder(borderRadius: BorderRadius.zero),
+                                                      labelText: 'go to nftv.app/$code to connect your NFT wallet',
+                                                      hintText: "use + to add multiple",
+                                                      labelStyle: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin"),
+                                                      hintStyle: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin"),
                                                     ),
                                                   )),
                                                   FutureBuilder<List<Nft>>(
                                                       future: futureNfts,
-                                                      builder:
-                                                          (context, snapshot) {
+                                                      builder: (context, snapshot) {
                                                         if (snapshot.hasData) {
                                                           return Padding(
-                                                              padding: EdgeInsets
-                                                                  .only(
-                                                                      left:
-                                                                          10.0),
+                                                              padding: EdgeInsets.only(left: 10.0),
                                                               child: SizedBox(
                                                                   height: 59,
-                                                                  child:
-                                                                      ElevatedButton(
-                                                                    autofocus:
-                                                                        true,
-                                                                    style: ElevatedButton
-                                                                        .styleFrom(
-                                                                      primary:
-                                                                          MyColors
-                                                                              .salmon,
-                                                                      elevation:
-                                                                          0,
-                                                                    ),
-                                                                    onPressed:
-                                                                        () {
+                                                                  child: ElevatedButton(
+                                                                    autofocus: true,
+                                                                    style: ElevatedButton.styleFrom(
+                                                                        textStyle: TextStyle(fontFamily: "BigJohnProThin"),
+                                                                        primary: Colors.black,
+                                                                        elevation: 0,
+                                                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero)),
+                                                                    onPressed: () {
                                                                       // Add your onPressed code here!
-                                                                      Navigator
-                                                                          .push(
+                                                                      Navigator.push(
                                                                         context,
                                                                         MaterialPageRoute(
-                                                                            builder: (context) =>
-                                                                                MyDisplay(
+                                                                            builder: (context) => MyDisplay(
                                                                                   nfts: snapshot.data,
+                                                                                  start: 0,
                                                                                   sett: sett,
                                                                                 )),
                                                                       );
                                                                     },
-                                                                    child: Row(
-                                                                        children: [
-                                                                          Icon(Icons
-                                                                              .play_arrow),
-                                                                          Text(
-                                                                              " Start Display")
-                                                                        ]),
+                                                                    child: Row(children: [
+                                                                      Icon(Icons.play_arrow),
+                                                                      Text(
+                                                                        " Start Display".toUpperCase(),
+                                                                      )
+                                                                    ]),
                                                                   )));
-                                                        } else if (snapshot
-                                                            .hasError) {
-                                                          return Text(
-                                                              "${snapshot.error}");
+                                                        } else if (snapshot.hasError) {
+                                                          return Text("${snapshot.error}");
                                                         }
                                                         // By default, show a loading spinner.
                                                         return Padding(
-                                                            padding:
-                                                                EdgeInsets.all(
-                                                                    10.0),
+                                                            padding: EdgeInsets.all(10.0),
                                                             child: SizedBox(
                                                                 height: 59,
-                                                                child:
-                                                                    ElevatedButton(
-                                                                  onPressed:
-                                                                      null,
-                                                                  autofocus:
-                                                                      true,
-                                                                  style: ElevatedButton
-                                                                      .styleFrom(
-                                                                    primary:
-                                                                        MyColors
-                                                                            .salmon,
-                                                                    elevation:
-                                                                        0,
-                                                                  ),
-                                                                  child: Row(
-                                                                      children: [
-                                                                        Icon(Icons
-                                                                            .play_arrow),
-                                                                        Text(
-                                                                            " Start Display")
-                                                                      ]),
+                                                                child: ElevatedButton(
+                                                                  onPressed: null,
+                                                                  autofocus: true,
+                                                                  style: ElevatedButton.styleFrom(
+                                                                      textStyle: TextStyle(fontFamily: "BigJohnProThin"),
+                                                                      primary: Colors.white,
+                                                                      elevation: 0,
+                                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero)),
+                                                                  child: Row(children: [
+                                                                    Icon(Icons.play_arrow),
+                                                                    Text(
+                                                                      " Start Display",
+                                                                    )
+                                                                  ]),
                                                                 )));
                                                       }),
                                                 ])))),
-                                    Expanded(
-                                        child: Center(
-                                            child: MyGrid(
-                                                nfts: futureNfts, sett: sett)))
+                                    renderGrid(context)
                                   ]));
                                 }));
                           }
@@ -1077,68 +960,66 @@ class _MyHomeState extends State<MyHome> {
               }
               return (Column(children: <Widget>[
                 Container(
-                  color: Colors.grey[400].withOpacity(0.2),
+                  color: Color(0xFFD7D7D7),
                   child: Padding(
                     padding: EdgeInsets.all(10.0),
                     child: Theme(
                       data: new ThemeData(
-                        primaryColor: Colors.white,
-                        primaryColorDark: Colors.white,
+                        primaryColor: Colors.black,
+                        primaryColorDark: Colors.black,
                       ),
                       child: TextField(
-                        style: TextStyle(color: Colors.white),
+                        style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin"),
                         controller: _controller,
                         onChanged: (text) {
-                          setState(() {futureNfts = fetchNfts(text, sett);});
+                          setState(() {
+                            futureNfts = fetchNfts(text, sett);
+                          });
                         },
                         decoration: InputDecoration(
-                          enabledBorder: const OutlineInputBorder(
-                            borderSide: const BorderSide(
-                              color: Colors.white,
+                            enabledBorder: const OutlineInputBorder(
+                              borderRadius: BorderRadius.zero,
+                              borderSide: const BorderSide(
+                                color: Colors.black,
+                              ),
                             ),
-                          ),
-                          border: OutlineInputBorder(),
-                          labelText: 'NFT wallet address or Nifty Username',
-                          hintText: "use + to add multiple",
-                          labelStyle: TextStyle(color: Colors.white),
-                          hintStyle: TextStyle(color: Colors.white),
-                          suffixIcon: IconButton(
-                            onPressed: _controller?.clear,
-                            icon: Icon(Icons.clear,color: Colors.white),
-                          )
-                        ),
+                            border: OutlineInputBorder(),
+                            labelText: 'NFT wallet address or Nifty Username',
+                            hintText: "use + to add multiple".toUpperCase(),
+                            labelStyle: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin"),
+                            hintStyle: TextStyle(color: Colors.black),
+                            suffixIcon: IconButton(
+                              onPressed: _controller?.clear,
+                              icon: Icon(Icons.clear, color: Colors.black),
+                            )),
                       ),
                     ),
                   ),
                 ),
-                Expanded(
-                    child: Center(child: MyGrid(nfts: futureNfts, sett: sett)))
+                renderGrid(context)
               ]));
             }),
       ),
       endDrawer: Container(
         width: 300,
+        color: Color(0xFFFFFFFF),
         child: Drawer(
+          elevation: 0,
           child: SafeArea(
             child: Container(
-              color: Colors.grey,
+              color: Color(0xFFFFFFFF),
               padding: EdgeInsets.all(16.0),
               child: Center(
                 child: Column(
                   children: <Widget>[
                     Text(
-                      "Settings",
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w300,
-                          fontSize: 22),
+                      "SETTINGS",
+                      style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin", fontSize: 22),
                     ),
                     SwitchListTile(
-                      title: Text('Show Artist',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w300)),
+                      title: Text('Show Artist'.toUpperCase(), style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin")),
                       value: sett.showArtist,
+                      activeColor: Colors.black,
                       onChanged: (value) {
                         setState(() {
                           sett.showArtist = value;
@@ -1147,11 +1028,9 @@ class _MyHomeState extends State<MyHome> {
                       },
                     ),
                     SwitchListTile(
-                      title: Text('Show Owner',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w300)),
+                      title: Text('Show Owner'.toUpperCase(), style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin")),
                       value: sett.showOwner,
+                      activeColor: Colors.black,
                       onChanged: (value) {
                         setState(() {
                           sett.showOwner = value;
@@ -1160,11 +1039,9 @@ class _MyHomeState extends State<MyHome> {
                       },
                     ),
                     SwitchListTile(
-                      title: Text('Show Price',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w300)),
+                      title: Text('Show Price'.toUpperCase(), style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin")),
                       value: sett.showPrice,
+                      activeColor: Colors.black,
                       onChanged: (value) {
                         setState(() {
                           sett.showPrice = value;
@@ -1173,11 +1050,9 @@ class _MyHomeState extends State<MyHome> {
                       },
                     ),
                     SwitchListTile(
-                      title: Text('Show QR code',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w300)),
+                      title: Text('Show QR code'.toUpperCase(), style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin")),
                       value: sett.showQrcode,
+                      activeColor: Colors.black,
                       onChanged: (value) {
                         setState(() {
                           sett.showQrcode = value;
@@ -1186,11 +1061,9 @@ class _MyHomeState extends State<MyHome> {
                       },
                     ),
                     SwitchListTile(
-                      title: Text('Show Title',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w300)),
+                      title: Text('Show Title'.toUpperCase(), style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin")),
                       value: sett.showTitle,
+                      activeColor: Colors.black,
                       onChanged: (value) {
                         setState(() {
                           sett.showTitle = value;
@@ -1199,11 +1072,9 @@ class _MyHomeState extends State<MyHome> {
                       },
                     ),
                     SwitchListTile(
-                      title: Text('Show Traits',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w300)),
+                      title: Text('Show Traits'.toUpperCase(), style: TextStyle(color: Colors.black, fontFamily: "BigJohnProThin")),
                       value: sett.showTraits,
+                      activeColor: Colors.black,
                       onChanged: (value) {
                         setState(() {
                           sett.showTraits = value;
@@ -1212,22 +1083,22 @@ class _MyHomeState extends State<MyHome> {
                       },
                     ),
                     Padding(
-                      padding: const EdgeInsets.only(
-                          top: 15, bottom: 15, left: 15, right: 15),
+                      padding: const EdgeInsets.only(top: 15, bottom: 15, left: 15, right: 15),
                       child: TextField(
-                        style: TextStyle(color: Colors.white),
+                        style: TextStyle(color: Colors.black),
                         keyboardType: TextInputType.number,
                         controller: imgHldController,
                         decoration: InputDecoration(
                           enabledBorder: const OutlineInputBorder(
+                            borderRadius: BorderRadius.zero,
                             borderSide: const BorderSide(
-                              color: Colors.white,
+                              color: Colors.black,
                             ),
                           ),
                           border: OutlineInputBorder(),
                           labelText: 'Image Hold Duration',
-                          labelStyle: TextStyle(color: Colors.white),
-                          hintStyle: TextStyle(color: Colors.white),
+                          labelStyle: TextStyle(color: Colors.black),
+                          hintStyle: TextStyle(color: Colors.black),
                         ),
                         onChanged: (text) {
                           setState(() {
@@ -1236,17 +1107,7 @@ class _MyHomeState extends State<MyHome> {
                           });
                         },
                       ),
-                    ),
-                    ElevatedButton(
-                      autofocus: true,
-                      onPressed: () {
-                        _closeEndDrawer();
-                      },
-                      child: const Text('Close',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w300)),
-                    ),
+                    )
                   ],
                 ),
               ),
@@ -1256,14 +1117,41 @@ class _MyHomeState extends State<MyHome> {
       ),
     );
   }
+
+  Widget renderGrid(BuildContext context) {
+    return (Expanded(
+        child: Row(children: [
+      FutureBuilder(
+          future: futureNfts,
+          builder: (context, snapshot) {
+            if (snapshot.hasData) {
+              int count = 0;
+              for (Nft nft in snapshot.data) {
+                if (nft.enabled) {
+                  count++;
+                }
+              }
+              return (sideText(context, "DISPLAYING " + count.toString() + "/" + snapshot.data.length.toString() + " NFTS", -1));
+            } else {
+              return (sideText(context, "LOADING NFTS...", -1));
+            }
+          }),
+      Expanded(child: Center(child: MyGrid(update: update, nfts: futureNfts, sett: sett))),
+      sideText(context, "Use + to combine multiple wallets".toUpperCase(), 1)
+    ])));
+  }
+
+  Widget sideText(BuildContext context, String value, int turns) {
+    return (Padding(padding: const EdgeInsets.only(left: 4, right: 4), child: RotatedBox(quarterTurns: turns, child: Text(value, style: TextStyle(fontSize: 14, fontFamily: "BigJohnProThin")))));
+  }
 }
 
 class MyDisplay extends StatefulWidget {
   final List<Nft> nfts;
   final Settings sett;
+  final int start;
 
-  MyDisplay({Key key, @required this.nfts, @required this.sett})
-      : super(key: key);
+  MyDisplay({Key key, @required this.nfts, @required this.sett, @required this.start}) : super(key: key);
 
   @override
   _MyDisplayState createState() => _MyDisplayState();
@@ -1272,8 +1160,6 @@ class MyDisplay extends StatefulWidget {
 class _MyDisplayState extends State<MyDisplay> {
   var _isFullScreen = true;
   var _disposed = false;
-  Map<int, VideoPlayerController> vidcontroller = {};
-  Map<int, Future<void>> _initializeVideoPlayerFuture = {};
 
   @override
   void initState() {
@@ -1283,18 +1169,12 @@ class _MyDisplayState extends State<MyDisplay> {
   }
 
   @override
-  void dispose() {
-    super.dispose();
+  void dispose() async {
     _disposed = true;
     Wakelock.disable();
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
-    vidcontroller.forEach((index, element) {
-      if(element != null) {
-        element.dispose();
-      }
-    });
     _exitFullScreen();
-
+    super.dispose();
   }
 
   void _toggleFullscreen() async {
@@ -1308,29 +1188,19 @@ class _MyDisplayState extends State<MyDisplay> {
   void _enterFullScreen() async {
     await SystemChrome.setEnabledSystemUIOverlays([]);
     if (_disposed) return;
-    setState(() {
-      _isFullScreen = true;
-    });
+    _isFullScreen = true;
   }
 
   void _exitFullScreen() async {
     await SystemChrome.setEnabledSystemUIOverlays(SystemUiOverlay.values);
     if (_disposed) return;
-    setState(() {
-      _isFullScreen = false;
-    });
+    _isFullScreen = false;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
         backgroundColor: Colors.black,
-        appBar: _isFullScreen
-            ? null
-            : AppBar(
-                title: Text("NFTV"),
-                iconTheme: IconThemeData(color: Colors.white),
-              ),
         body: GestureDetector(
           child: Container(child: Center(child: playView(context))),
           onTap: _toggleFullscreen,
@@ -1345,163 +1215,115 @@ class _MyDisplayState extends State<MyDisplay> {
     }
     return CarouselSlider(
       options: CarouselOptions(
+        initialPage: widget.start,
         height: height,
         viewportFraction: 1.0,
         autoPlay: autoplay,
         autoPlayInterval: Duration(milliseconds: widget.sett.imgDuration),
         autoPlayAnimationDuration: Duration(milliseconds: 1),
-        onPageChanged: (index, reason) {
-          int last;
-          if (index == 0) {
-            last = widget.nfts.length - 1;
-          } else {
-            last = index - 1;
-          }
-          if(vidcontroller[last] != null) {
-            vidcontroller[last].dispose();
-          }
-        },
+        onPageChanged: (index, reason) {},
       ),
-      items: widget.nfts
-          .where((element) => element.enabled == true)
-          .toList()
-          .asMap()
-          .entries
-          .map((entry) {
+      items: widget.nfts.where((element) => element.enabled == true).toList().asMap().entries.map((entry) {
         int index = entry.key;
         Nft i = entry.value;
         return Builder(
           builder: (BuildContext context) {
-            print(i.animUrl.toString());
-            Future<File> image = DefaultCacheManager().getSingleFile(i.imgUrl);
-            Future<File> video = DefaultCacheManager().getSingleFile(i.animUrl);
-            Future<File> qr = DefaultCacheManager().getSingleFile(
-                "https://api.qrserver.com/v1/create-qr-code/?bgcolor=999999&size=70x70&data=" +
-                    i.qr);
-            Future<File> thumbnail =
-                DefaultCacheManager().getSingleFile(i.thumbUrl);
+            Stream<FileResponse> image = DefaultCacheManager().getImageFile(i.imgUrl, withProgress: true, headers: {'Accept-Encoding': ''});
+            Future<File> qr = DefaultCacheManager().getSingleFile("https://api.qrserver.com/v1/create-qr-code/?bgcolor=120-120-120&size=70x70&data=" + i.qr);
             return DefaultTextStyle(
               style: TextStyle(
-                color: Colors.white.withOpacity(0.5),
-                fontWeight: FontWeight.w300,
+                color: Colors.black.withOpacity(0.5),
+                fontFamily: "BigJohnProThin",
               ),
               child: Stack(
                 children: <Widget>[
-                  if (i.type == "animated")
-                    Center(
-                        child: Stack(children: <Widget>[
-                      GestureDetector(
-                        child: FutureBuilder(
-                            future: video,
-                            builder: (context, snapshot) {
-                              if (snapshot.hasData) {
-                                if (vidcontroller.containsKey(index) &&
-                                    vidcontroller[index] != null) {
-                                  vidcontroller[index].dispose();
-                                }
-                                if (kIsWeb) {
-                                  vidcontroller[index] =
-                                      VideoPlayerController.network(i.animUrl);
-                                } else {
-                                  vidcontroller[index] =
-                                      VideoPlayerController.file(snapshot.data);
-                                }
-                                vidcontroller[index].setLooping(true);
-                                _initializeVideoPlayerFuture[index] =
-                                    vidcontroller[index].initialize();
-                                return (FutureBuilder(
-                                  future: _initializeVideoPlayerFuture[index],
-                                  builder: (context, snapshot) {
-                                    if (snapshot.connectionState ==
-                                        ConnectionState.done) {
-                                      vidcontroller[index].play();
-                                      // If the VideoPlayerController has finished initialization, use
-                                      // the data it provides to limit the aspect ratio of the VideoPlayer.
-                                      return AspectRatio(
-                                        aspectRatio: vidcontroller[index]
-                                            .value
-                                            .aspectRatio,
-                                        // Use the VideoPlayer widget to display the video.
-                                        child:
-                                            VideoPlayer(vidcontroller[index]),
-                                      );
-                                    } else {
-                                      // If the VideoPlayerController is still initializing, show a
-                                      // loading spinner.
-                                      return Center(
-                                          child: Opacity(
-                                        opacity: 0.2,
-                                        child: CircularProgressIndicator(),
-                                      ));
-                                    }
-                                  },
-                                ));
-                              } else {
-                                return Center(
-                                    child: Opacity(
-                                  opacity: 0.2,
-                                  child: CircularProgressIndicator(),
-                                ));
-                              }
-                            }),
-                        key: ValueKey(i.imgUrl.toString()),
-                        onTap: null,
-                      )
-                    ])),
+                  if (i.type == "animated") Center(child: videoPlayer(context, i)),
                   if (i.type == "image")
                     Center(
                         child: Stack(children: <Widget>[
-                      GestureDetector(
-                        child: FutureBuilder(
-                            future: image,
-                            builder: (context, snapshot) {
-                              if (snapshot.hasData) {
-                                return (Image.file(snapshot.data));
-                              } else {
+                      StreamBuilder<FileResponse>(
+                          stream: image,
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData || snapshot.data is DownloadProgress) {
+                              if (snapshot.data != null) {
                                 return Center(
                                     child: Opacity(
-                                  opacity: 0.2,
-                                  child: CircularProgressIndicator(),
-                                ));
+                                        opacity: 0.2,
+                                        child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [
+                                          CircularProgressIndicator(value: (snapshot.data as DownloadProgress)?.progress),
+                                          Text(
+                                            "Downloading " +
+                                                (((snapshot.data as DownloadProgress).downloaded) / 1000000).toStringAsFixed(1) +
+                                                '/' +
+                                                (((snapshot.data as DownloadProgress).totalSize) / 1000000).toStringAsFixed(1) +
+                                                'MB',
+                                            style: TextStyle(color: Colors.white),
+                                          )
+                                        ])));
                               }
-                            }),
-                        key: ValueKey(i.imgUrl.toString()),
-                        onTap: null,
-                      )
+                              return Center(
+                                  child: Opacity(
+                                opacity: 0.2,
+                                child: CircularProgressIndicator(),
+                              ));
+                            } else {
+                              return (Image.file((snapshot.data as FileInfo).file));
+                            }
+                          }),
                     ])),
                   Padding(
                     padding: EdgeInsets.all(16.0),
                     child: Container(
-                        width: 160,
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (widget.sett.showTitle == true)
-                                Text(
-                                  i.name,
-                                  style: TextStyle(fontSize: 18, height: 1.5),
-                                ),
-                              if (widget.sett.showArtist == true)
-                                Text(
-                                  "artist: " + i.artist,
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              if (widget.sett.showOwner == true)
-                                Text(
-                                  "owner: " + i.owner,
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              if (widget.sett.showPrice == true)
-                                Text(
-                                  "last sale: " + i.lastSale.toString(),
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              if (widget.sett.showTraits == true)
-                                Text(
-                                  "traits: " + i.traits,
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                            ])),
+                        width: 200,
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          if (widget.sett.showTitle == true)
+                            RichText(
+                              text: TextSpan(
+                                text: i.name,
+                                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 18, height: 1.5, fontFamily: "BigJohnProThin"),
+                              ),
+                            ),
+                          if (widget.sett.showArtist == true)
+                            RichText(
+                              text: TextSpan(
+                                text: 'Artist: ',
+                                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 9, fontFamily: "BigJohnPro"),
+                                children: <TextSpan>[
+                                  TextSpan(text: i.artist, style: TextStyle(fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          if (widget.sett.showOwner == true)
+                            RichText(
+                              text: TextSpan(
+                                text: 'Owner: ',
+                                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 9, fontFamily: "BigJohnPro"),
+                                children: <TextSpan>[
+                                  TextSpan(text: i.owner, style: TextStyle(fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          if (widget.sett.showPrice == true)
+                            RichText(
+                              text: TextSpan(
+                                text: 'Last Sale: ',
+                                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 9, fontFamily: "BigJohnPro"),
+                                children: <TextSpan>[
+                                  TextSpan(text: i.lastSale, style: TextStyle(fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                          if (widget.sett.showTraits == true)
+                            RichText(
+                              text: TextSpan(
+                                text: 'Traits: ',
+                                style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 9, fontFamily: "BigJohnPro"),
+                                children: <TextSpan>[
+                                  TextSpan(text: i.traits, style: TextStyle(fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                        ])),
                   ),
                   if (widget.sett.showQrcode == true)
                     Positioned(
@@ -1513,12 +1335,7 @@ class _MyDisplayState extends State<MyDisplay> {
                               future: qr,
                               builder: (context, snapshot) {
                                 if (snapshot.hasData) {
-                                  return (Container(
-                                      width: 50.0,
-                                      height: 50.0,
-                                      child: Center(
-                                          child: Image.file(snapshot.data,
-                                              width: 50, height: 50))));
+                                  return (Container(width: 40.0, height: 40.0, child: Center(child: Image.file(snapshot.data, width: 50, height: 50))));
                                 }
                                 return Center(
                                     child: Opacity(
@@ -1534,5 +1351,82 @@ class _MyDisplayState extends State<MyDisplay> {
         );
       }).toList(),
     );
+  }
+
+  Widget videoPlayer(BuildContext context, Nft i) {
+    if (kIsWeb) {
+      if (_disposed == false) {
+        Future<void> _initializeVideoPlayerFuture;
+        VideoPlayerController _controller = VideoPlayerController.network(
+          i.animUrl,
+        );
+        _controller.setLooping(true);
+        _controller.play();
+        _initializeVideoPlayerFuture = _controller.initialize();
+        return (FutureBuilder(
+          future: _initializeVideoPlayerFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.done) {
+              // If the VideoPlayerController has finished initialization, use
+              // the data it provides to limit the aspect ratio of the VideoPlayer.
+              return AspectRatio(
+                aspectRatio: _controller.value.aspectRatio,
+                // Use the VideoPlayer widget to display the video.
+                child: VideoPlayer(_controller),
+              );
+            } else {
+              // If the VideoPlayerController is still initializing, show a
+              // loading spinner.
+              return Opacity(opacity: 0.05, child: CircularProgressIndicator());
+            }
+          },
+        ));
+      }
+      return Opacity(opacity: 0.05, child: CircularProgressIndicator());
+    } else {
+      Stream<FileResponse> video = DefaultCacheManager().getFileStream(i.animUrl, withProgress: true);
+      return (StreamBuilder<FileResponse>(
+          stream: video,
+          builder: (context, snapshot) {
+            if (snapshot.hasData && snapshot.data is FileInfo) {
+              if (_disposed == false) {
+                return (NativeVideoView(
+                  keepAspectRatio: true,
+                  showMediaController: false,
+                  onCreated: (controller) {
+                    controller.setVideoSource(
+                      (snapshot.data as FileInfo).file.path,
+                      sourceType: VideoSourceType.file,
+                    );
+                  },
+                  onPrepared: (controller, info) {
+                    controller.play();
+                  },
+                  onError: (controller, what, extra, message) {},
+                  onCompletion: (controller) {
+                    controller.play();
+                  },
+                  onProgress: (progress, duration) {},
+                ));
+              }
+            } else if (snapshot.data is DownloadProgress) {
+              return Center(
+                  child: Opacity(
+                opacity: 0.4,
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [
+                  CircularProgressIndicator(value: (snapshot.data as DownloadProgress).progress),
+                  Text(
+                      "Downloading " +
+                          (((snapshot.data as DownloadProgress).downloaded) / 1000000).toStringAsFixed(1) +
+                          '/' +
+                          (((snapshot.data as DownloadProgress).totalSize) / 1000000).toStringAsFixed(1) +
+                          'MB',
+                      style: TextStyle(color: Colors.white))
+                ]),
+              ));
+            }
+            return Opacity(opacity: 0.05, child: CircularProgressIndicator());
+          }));
+    }
   }
 }
